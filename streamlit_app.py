@@ -232,23 +232,10 @@ def process_one(file):
     # Step 1 — background removal
     if remove_bg:
         try:
-            import rembg
-            import threading
-            result = [None]
-            error  = [None]
-            def _run():
-                try:
-                    result[0] = rembg.remove(raw_bytes, model_name="u2netp")
-                except Exception as e:
-                    error[0] = e
-            t = threading.Thread(target=_run)
-            t.start()
-            t.join(timeout=120)   # wait max 2 minutes
-            if error[0]:
-                raise RuntimeError(str(error[0]))
-            if result[0] is None:
-                raise RuntimeError("Background removal timed out. Try a smaller image.")
-            img = Image.open(io.BytesIO(result[0])).convert("RGBA")
+            from rembg import remove as rembg_remove, new_session
+            session = new_session("u2netp")
+            result = rembg_remove(raw_bytes, session=session)
+            img = Image.open(io.BytesIO(result)).convert("RGBA")
         except ImportError:
             raise RuntimeError("rembg not installed. Check requirements.txt.")
     else:
