@@ -93,9 +93,10 @@ fill_white = bg_choice == "Remove background — fill with white"
 
 if remove_bg:
     st.info(
-        "🤖 Background removal uses AI (`rembg`). "
-        "The first run downloads the model (~170 MB) — this is automatic."
+        "🤖 Background removal uses AI (`rembg` with u2netp model ~4MB). "
+        "First run downloads the model automatically — takes about 10-20 seconds."
     )
+    st.warning("⏳ Please be patient after clicking Process — background removal takes 10-30 seconds per image depending on size.")
     if fill_white:
         st.caption("✅ After removal, transparent areas will be filled with white.")
     else:
@@ -229,9 +230,13 @@ def process_one(file):
 
     # Step 1 — background removal
     if remove_bg:
-        from rembg import remove as rembg_remove
-        raw_bytes = rembg_remove(raw_bytes)
-        img = Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
+        try:
+            from rembg import remove as rembg_remove, new_session
+            session = new_session("u2netp")  # u2netp is small & fast (~4MB)
+            raw_bytes = rembg_remove(raw_bytes, session=session)
+            img = Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
+        except Exception as e:
+            raise RuntimeError(f"Background removal failed: {e}")
     else:
         img = orig_pil.copy()
 
@@ -337,3 +342,4 @@ if st.button("🚀 Process & Resize All Images", type="primary", use_container_w
 
 st.divider()
 st.caption("Images are processed only in your session — nothing is stored or sent anywhere.")
+st.markdown("<div style='text-align:center; color:#888; font-size:0.8rem; padding-top:8px;'>Created by <strong>Kashish Sitlani</strong></div>", unsafe_allow_html=True)
