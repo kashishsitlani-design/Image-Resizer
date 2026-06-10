@@ -154,7 +154,7 @@ resize_mode = st.radio(
     help=(
         "**By Width only** — height auto-calculated per each image ratio.\n\n"
         "**By Height only** — width auto-calculated per each image ratio.\n\n"
-        "**Exact W × H** — forces exact size (may stretch if ratio differs)."
+        "**Exact W × H** — image fits inside the box keeping its own ratio. Never stretches or distorts."
     ),
 )
 
@@ -214,11 +214,16 @@ if out_fmt == "JPEG" and remove_bg and not fill_white:
 # ─────────────────────────────────────────────────────────────────
 def get_new_size(orig_w, orig_h):
     if resize_mode == "By Width only":
+        # Scale so width matches exactly, height follows ratio
         return target_w, max(1, round(orig_h * target_w / orig_w))
     elif resize_mode == "By Height only":
+        # Scale so height matches exactly, width follows ratio
         return max(1, round(orig_w * target_h / orig_h)), target_h
     else:
-        return target_w, target_h
+        # Exact W x H — fit INSIDE the box, never stretch or distort
+        # Each image keeps its own ratio
+        scale = min(target_w / orig_w, target_h / orig_h)
+        return max(1, round(orig_w * scale)), max(1, round(orig_h * scale))
 
 
 def process_one(file):
