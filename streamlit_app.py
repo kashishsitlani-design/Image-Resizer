@@ -214,14 +214,11 @@ if out_fmt == "JPEG" and remove_bg and not fill_white:
 # ─────────────────────────────────────────────────────────────────
 def get_new_size(orig_w, orig_h):
     if resize_mode == "By Width only":
-        # Scale so width matches exactly, height follows ratio
         return target_w, max(1, round(orig_h * target_w / orig_w))
     elif resize_mode == "By Height only":
-        # Scale so height matches exactly, width follows ratio
         return max(1, round(orig_w * target_h / orig_h)), target_h
     else:
-        # Exact W x H — fit INSIDE the box, never stretch or distort
-        # Each image keeps its own ratio
+        # Fit inside box keeping ratio — canvas fills remaining space with white
         scale = min(target_w / orig_w, target_h / orig_h)
         return max(1, round(orig_w * scale)), max(1, round(orig_h * scale))
 
@@ -259,14 +256,27 @@ def process_one(file):
         img = bg
         has_alpha = False
 
-    # Step 3 — resize
+    # Step 3 — resize keeping ratio, then place on exact-size white canvas
     new_w, new_h = get_new_size(img.width, img.height)
     img = img.resize((new_w, new_h), Image.LANCZOS)
 
-    # Step 4 — convert mode for chosen format
+    # If Exact W×H mode, paste onto a white canvas of the exact target size
+    # so output is always exactly target_w × target_h with no stretching
     save_fmt = out_fmt or orig_fmt
+    if resize_mode == "Exact W × H" and (new_w != target_w or new_h != target_h):
+        canvas = Image.new("RGB", (target_w, target_h), (255, 255, 255))
+        # Centre the image on the canvas
+        offset_x = (target_w - new_w) // 2
+        offset_y = (target_h - new_h) // 2
+        if img.mode == "RGBA":
+            canvas.paste(img, (offset_x, offset_y), mask=img.split()[3])
+        else:
+            canvas.paste(img.convert("RGB"), (offset_x, offset_y))
+        img = canvas
+
+    # Step 4 — convert mode for chosen format
     if save_fmt == "JPEG":
-        img = img.convert("RGB")   # drop alpha — no white fill unless user chose it
+        img = img.convert("RGB")
     elif save_fmt in ("PNG", "WEBP"):
         if img.mode not in ("RGBA", "RGB", "L", "LA"):
             img = img.convert("RGBA" if has_alpha else "RGB")
