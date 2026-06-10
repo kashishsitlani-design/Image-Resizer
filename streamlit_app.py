@@ -336,11 +336,22 @@ def process_image_bytes(raw_bytes, filename):
             else:
                 canvas.paste(img.convert("RGB"), (offset_x, offset_y))
         else:
-            # Keep original background — transparent canvas so no colour is added
-            canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
-            if img.mode != "RGBA":
-                img = img.convert("RGBA")
-            canvas.paste(img, (offset_x, offset_y))
+            # Use original background colour detected from image corners
+            orig_rgb = orig_pil.convert("RGB")
+            corners  = [
+                orig_rgb.getpixel((0, 0)),
+                orig_rgb.getpixel((orig_pil.width - 1, 0)),
+                orig_rgb.getpixel((0, orig_pil.height - 1)),
+                orig_rgb.getpixel((orig_pil.width - 1, orig_pil.height - 1)),
+            ]
+            avg_r = sum(c[0] for c in corners) // 4
+            avg_g = sum(c[1] for c in corners) // 4
+            avg_b = sum(c[2] for c in corners) // 4
+            canvas = Image.new("RGB", (target_w, target_h), (avg_r, avg_g, avg_b))
+            if img.mode == "RGBA":
+                canvas.paste(img, (offset_x, offset_y), mask=img.split()[3])
+            else:
+                canvas.paste(img.convert("RGB"), (offset_x, offset_y))
         img = canvas
 
     # Step 6 — auto fill canvas scaling
@@ -355,25 +366,50 @@ def process_image_bytes(raw_bytes, filename):
         if fill_white:
             final = Image.new("RGB", (target_w, target_h), (255, 255, 255))
         else:
-            # Transparent canvas — no bg added
-            final = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+            # Detect original bg colour from corners
+            orig_rgb = orig_pil.convert("RGB")
+            corners  = [
+                orig_rgb.getpixel((0, 0)),
+                orig_rgb.getpixel((orig_pil.width - 1, 0)),
+                orig_rgb.getpixel((0, orig_pil.height - 1)),
+                orig_rgb.getpixel((orig_pil.width - 1, orig_pil.height - 1)),
+            ]
+            avg_r = sum(c[0] for c in corners) // 4
+            avg_g = sum(c[1] for c in corners) // 4
+            avg_b = sum(c[2] for c in corners) // 4
+            final = Image.new("RGB", (target_w, target_h), (avg_r, avg_g, avg_b))
         ox = (target_w - new_fw) // 2
         oy = (target_h - new_fh) // 2
         if img.mode == "RGBA":
             final.paste(img, (ox, oy), mask=img.split()[3])
         else:
-            if img.mode != "RGBA":
-                img = img.convert("RGBA")
-            final.paste(img, (ox, oy))
+            final.paste(img.convert("RGB"), (ox, oy))
         img = final
 
     # Step 7 — convert for save format
-    # JPEG has no alpha channel — drop it without adding any background colour
     if save_fmt == "JPEG":
-        if img.mode == "RGBA" and not fill_white:
-            # Drop alpha, keep pixel colours exactly — no white fill
-            r, g, b, a = img.split()
-            img = Image.merge("RGB", (r, g, b))
+        if img.mode == "RGBA":
+            if fill_white:
+                # User explicitly chose white — paste on white
+                bg = Image.new("RGB", img.size, (255, 255, 255))
+                bg.paste(img, mask=img.split()[3])
+                img = bg
+            else:
+                # Detect original background colour from corners and use it
+                # This avoids both white AND black being added
+                corners = [
+                    orig_pil.convert("RGB").getpixel((0, 0)),
+                    orig_pil.convert("RGB").getpixel((orig_pil.width - 1, 0)),
+                    orig_pil.convert("RGB").getpixel((0, orig_pil.height - 1)),
+                    orig_pil.convert("RGB").getpixel((orig_pil.width - 1, orig_pil.height - 1)),
+                ]
+                # Average the 4 corners to get the background colour
+                avg_r = sum(c[0] for c in corners) // 4
+                avg_g = sum(c[1] for c in corners) // 4
+                avg_b = sum(c[2] for c in corners) // 4
+                bg = Image.new("RGB", img.size, (avg_r, avg_g, avg_b))
+                bg.paste(img, mask=img.split()[3])
+                img = bg
         else:
             img = img.convert("RGB")
     elif save_fmt in ("PNG", "WEBP"):
