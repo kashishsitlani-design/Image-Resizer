@@ -70,6 +70,33 @@ if not uploaded:
 st.success(f"✅ {len(uploaded)} image{'s' if len(uploaded) > 1 else ''} ready")
 
 # ─────────────────────────────────────────────────────────────────
+# ADMIN PASSWORD LOCK
+# ─────────────────────────────────────────────────────────────────
+if "admin_unlocked" not in st.session_state:
+    st.session_state.admin_unlocked = False
+
+correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
+
+if not st.session_state.admin_unlocked:
+    st.divider()
+    st.subheader("🔐 Admin Settings")
+    st.info("All settings are locked. Enter the admin password to change background removal, dimensions, and format.")
+    pwd = st.text_input("Enter password to unlock settings", type="password")
+    if st.button("🔓 Unlock Settings", use_container_width=True):
+        if pwd == correct_password:
+            st.session_state.admin_unlocked = True
+            st.rerun()
+        else:
+            st.error("❌ Wrong password. Please try again.")
+    st.stop()
+else:
+    col_lock1, col_lock2 = st.columns([4, 1])
+    col_lock1.caption("🔓 Settings unlocked — only you can see these options.")
+    if col_lock2.button("🔒 Lock"):
+        st.session_state.admin_unlocked = False
+        st.rerun()
+
+# ─────────────────────────────────────────────────────────────────
 # SECTION 1 — BACKGROUND
 # ─────────────────────────────────────────────────────────────────
 st.divider()
@@ -92,11 +119,11 @@ remove_bg = bg_choice in (
 fill_white = bg_choice == "Remove background — fill with white"
 
 if remove_bg:
-    st.info(
-        "🤖 Background removal uses AI (`rembg` with u2netp model ~4MB). "
-        "First run downloads the model automatically — takes about 10-20 seconds."
+    st.warning(
+        "⏳ Background removal uses AI. "
+        "First run takes 20–40 seconds to load the model. "
+        "After that it is much faster. Please do not click Stop."
     )
-    st.warning("⏳ Please be patient after clicking Process — background removal takes 10-30 seconds per image depending on size.")
     if fill_white:
         st.caption("✅ After removal, transparent areas will be filled with white.")
     else:
@@ -231,12 +258,25 @@ def process_one(file):
     # Step 1 — background removal
     if remove_bg:
         try:
-            from rembg import remove as rembg_remove, new_session
-            session = new_session("u2netp")  # u2netp is small & fast (~4MB)
-            raw_bytes = rembg_remove(raw_bytes, session=session)
-            img = Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
-        except Exception as e:
-            raise RuntimeError(f"Background removal failed: {e}")
+            import rembg
+            import threading
+            result = [None]
+            error  = [None]
+            def _run():
+                try:
+                    result[0] = rembg.remove(raw_bytes, model_name="u2netp")
+                except Exception as e:
+                    error[0] = e
+            t = threading.Thread(target=_run)
+            t.start()
+            t.join(timeout=120)   # wait max 2 minutes
+            if error[0]:
+                raise RuntimeError(str(error[0]))
+            if result[0] is None:
+                raise RuntimeError("Background removal timed out. Try a smaller image.")
+            img = Image.open(io.BytesIO(result[0])).convert("RGBA")
+        except ImportError:
+            raise RuntimeError("rembg not installed. Check requirements.txt.")
     else:
         img = orig_pil.copy()
 
