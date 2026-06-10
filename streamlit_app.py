@@ -69,32 +69,6 @@ if not uploaded:
 
 st.success(f"✅ {len(uploaded)} image{'s' if len(uploaded) > 1 else ''} ready")
 
-# ─────────────────────────────────────────────────────────────────
-# ADMIN PASSWORD LOCK
-# ─────────────────────────────────────────────────────────────────
-if "admin_unlocked" not in st.session_state:
-    st.session_state.admin_unlocked = False
-
-correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
-
-if not st.session_state.admin_unlocked:
-    st.divider()
-    st.subheader("🔐 Admin Settings")
-    st.info("All settings are locked. Enter the admin password to change background removal, dimensions, and format.")
-    pwd = st.text_input("Enter password to unlock settings", type="password")
-    if st.button("🔓 Unlock Settings", use_container_width=True):
-        if pwd == correct_password:
-            st.session_state.admin_unlocked = True
-            st.rerun()
-        else:
-            st.error("❌ Wrong password. Please try again.")
-    st.stop()
-else:
-    col_lock1, col_lock2 = st.columns([4, 1])
-    col_lock1.caption("🔓 Settings unlocked — only you can see these options.")
-    if col_lock2.button("🔒 Lock"):
-        st.session_state.admin_unlocked = False
-        st.rerun()
 
 # ─────────────────────────────────────────────────────────────────
 # SECTION 1 — BACKGROUND
