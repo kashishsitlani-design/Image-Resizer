@@ -294,11 +294,12 @@ def process_image_bytes(raw_bytes, filename):
         session = new_session("u2netp")
         raw_bytes = rembg_remove(raw_bytes, session=session)
         img = Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
-        # Crop to content bounding box after removal
+        # Crop to content bounding box after removal (tight crop, no padding)
         bbox = img.getbbox()
         if bbox:
             img = img.crop(bbox)
     else:
+        # Keep image exactly as-is — do NOT convert mode here
         img = orig_pil.copy()
 
     has_alpha = img.mode in ("RGBA", "LA", "PA") or (
@@ -322,22 +323,20 @@ def process_image_bytes(raw_bytes, filename):
     new_w, new_h = get_new_size(img.width, img.height)
     img = img.resize((new_w, new_h), Image.LANCZOS)
 
-    # Step 5 — if Exact W×H, place on canvas
-    # Canvas bg = white ONLY if user chose fill_white, otherwise TRANSPARENT (PNG) or just crop-fit
+    # Step 5 — if Exact W×H, place on canvas preserving original background
     save_fmt = out_fmt or orig_fmt
     if resize_mode == "Exact W × H" and (new_w != target_w or new_h != target_h):
         offset_x = (target_w - new_w) // 2
         offset_y = (target_h - new_h) // 2
-        if fill_white or save_fmt == "JPEG":
-            # White canvas
+        if fill_white:
+            # User explicitly chose white background
             canvas = Image.new("RGB", (target_w, target_h), (255, 255, 255))
-            paste_img = img.convert("RGB") if img.mode == "RGBA" else img
             if img.mode == "RGBA":
                 canvas.paste(img, (offset_x, offset_y), mask=img.split()[3])
             else:
-                canvas.paste(paste_img, (offset_x, offset_y))
+                canvas.paste(img.convert("RGB"), (offset_x, offset_y))
         else:
-            # Transparent canvas — no white bg added
+            # Keep original background — transparent canvas so no colour is added
             canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
             if img.mode != "RGBA":
                 img = img.convert("RGBA")
@@ -353,21 +352,30 @@ def process_image_bytes(raw_bytes, filename):
         new_fw    = max(1, round(img.width  * scale))
         new_fh    = max(1, round(img.height * scale))
         img       = img.resize((new_fw, new_fh), Image.LANCZOS)
-        if fill_white or save_fmt == "JPEG":
+        if fill_white:
             final = Image.new("RGB", (target_w, target_h), (255, 255, 255))
         else:
+            # Transparent canvas — no bg added
             final = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
         ox = (target_w - new_fw) // 2
         oy = (target_h - new_fh) // 2
         if img.mode == "RGBA":
             final.paste(img, (ox, oy), mask=img.split()[3])
         else:
-            final.paste(img.convert("RGB"), (ox, oy))
+            if img.mode != "RGBA":
+                img = img.convert("RGBA")
+            final.paste(img, (ox, oy))
         img = final
 
     # Step 7 — convert for save format
+    # JPEG has no alpha channel — drop it without adding any background colour
     if save_fmt == "JPEG":
-        img = img.convert("RGB")
+        if img.mode == "RGBA" and not fill_white:
+            # Drop alpha, keep pixel colours exactly — no white fill
+            r, g, b, a = img.split()
+            img = Image.merge("RGB", (r, g, b))
+        else:
+            img = img.convert("RGB")
     elif save_fmt in ("PNG", "WEBP"):
         if img.mode not in ("RGBA", "RGB", "L", "LA"):
             img = img.convert("RGBA" if has_alpha else "RGB")
