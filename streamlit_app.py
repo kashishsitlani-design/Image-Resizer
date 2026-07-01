@@ -1,5 +1,5 @@
 """
-Image Resizer Pro - Updated Streamlit App
+Creative Editing for Atlas - Streamlit App
 Requirements: streamlit, Pillow, rembg, onnxruntime, pandas, requests, openpyxl
 """
 
@@ -27,7 +27,7 @@ except Exception:
 # -----------------------------------------------------------------------------
 # Page setup and theme
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="Image Resizer Pro", page_icon="image", layout="centered")
+st.set_page_config(page_title="Creative Editing for Atlas", page_icon="🎨", layout="centered")
 
 NAVY = "#0B2E59"
 LIGHT_NAVY = "#123E73"
@@ -78,8 +78,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("Image Resizer Pro")
-st.caption("Bulk resize images from uploads or Excel links. Simple, fast, and marketplace-ready.")
+st.title("Creative Editing for Atlas")
+st.caption("Professional Image Editing • Bulk Processing • Smart Resize • Background Removal • Excel Image Links")
 
 
 # -----------------------------------------------------------------------------
@@ -224,7 +224,7 @@ def build_excel_sources(df: pd.DataFrame) -> Tuple[List[Dict], List[str], Option
 
 def download_with_retry(session: requests.Session, url: str, timeout: int = 20, retries: int = 3) -> bytes:
     last_error = None
-    headers = {"User-Agent": "Mozilla/5.0 ImageResizerPro/1.0"}
+    headers = {"User-Agent": "Mozilla/5.0 CreativeEditingAtlas/1.0"}
     for attempt in range(1, retries + 1):
         try:
             response = session.get(url, timeout=timeout, headers=headers, stream=True)
@@ -292,10 +292,10 @@ def paste_center(canvas: Image.Image, img: Image.Image) -> Image.Image:
 
 
 def should_use_smart_canvas(orig_w: int, orig_h: int, resize_mode: str) -> bool:
-    if resize_mode == "Exact W x H":
-        return True
-    ratio = max(orig_w / orig_h, orig_h / orig_w)
-    return ratio >= 3.0
+    # Only use a canvas when the user explicitly asks for an exact output box.
+    # Width-only and height-only modes must keep natural proportions and must not
+    # add extra background or shrink long/tall images into a square canvas.
+    return resize_mode == "Exact W x H"
 
 
 def get_target_size(orig_w: int, orig_h: int, resize_mode: str, target_w: int, target_h: int) -> Tuple[int, int]:
@@ -343,7 +343,8 @@ def process_image_bytes(
 
     bg_color = (255, 255, 255) if fill_white else average_corner_color(orig_pil)
 
-    # If user selected white background, flatten before resize.
+    # Only add/flatten to white when the user explicitly selected white background.
+    # Otherwise keep the image background/transparency as much as the output format allows.
     if fill_white:
         img = flatten_to_background(img, (255, 255, 255))
 
@@ -355,15 +356,21 @@ def process_image_bytes(
     smart_canvas = should_use_smart_canvas(orig_w, orig_h, resize_mode)
 
     if smart_canvas:
+        # Fit inside the exact box without stretching.
+        # A canvas is needed only because exact dimensions were requested.
         fitted = resize_fit(img, target_w, target_h)
-        if save_fmt == "JPEG" or fill_white:
+        if fill_white or save_fmt == "JPEG":
+            # JPEG has no transparency, so use detected original background unless user chose white.
             canvas = Image.new("RGB", (target_w, target_h), bg_color)
+        elif image_has_alpha(img) or remove_bg:
+            # Preserve transparency for PNG/WebP when possible.
+            canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
         else:
-            canvas = Image.new("RGBA", (target_w, target_h), (bg_color[0], bg_color[1], bg_color[2], 0))
-            if not image_has_alpha(img) and not remove_bg:
-                canvas = Image.new("RGB", (target_w, target_h), bg_color)
+            # Keep original-looking background; do not force white.
+            canvas = Image.new("RGB", (target_w, target_h), bg_color)
         img = paste_center(canvas, fitted)
     else:
+        # Width-only and height-only resize naturally. No canvas, no extra background.
         new_w, new_h = get_target_size(orig_w, orig_h, resize_mode, target_w, target_h)
         img = img.resize((new_w, new_h), Image.LANCZOS)
 
@@ -503,13 +510,14 @@ st.divider()
 st.subheader("Output Format")
 
 format_options = ["Keep original format", "PNG", "JPEG", "WEBP"]
-default_format = "JPEG" if marketplace != "Custom" else "Keep original format"
+# Default to keeping the original format to avoid unwanted JPEG compression or forced backgrounds.
+default_format = "Keep original format"
 chosen_format = st.selectbox("Output format", format_options, index=format_options.index(default_format))
 output_format = None if chosen_format == "Keep original format" else chosen_format
 
-quality = 92
-if output_format in ("JPEG", None):
-    quality = st.slider("JPEG quality", 10, 100, 92, 1)
+quality = 100
+if output_format == "JPEG":
+    quality = st.slider("JPEG quality", 10, 100, 100, 1)
 elif output_format == "WEBP":
     quality = st.slider("WebP quality", 10, 100, 90, 1)
 
@@ -643,11 +651,11 @@ if st.button("Process & Download ZIP", type="primary", use_container_width=True)
     st.download_button(
         label=f"Download ZIP ({success_count} images)",
         data=zip_buffer,
-        file_name="processed_images.zip",
+        file_name="creative_editing_atlas.zip",
         mime="application/zip",
         use_container_width=True,
         type="primary",
     )
 
 st.divider()
-st.caption("Images are processed only in your session. Created by Kashish Sitlani.")
+st.caption("Images are processed only in your session. Creative Editing for Atlas.")
