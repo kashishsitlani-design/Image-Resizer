@@ -280,6 +280,20 @@ def resize_fit(img: Image.Image, box_w: int, box_h: int) -> Image.Image:
     return fitted
 
 
+def resize_cover(img: Image.Image, box_w: int, box_h: int) -> Image.Image:
+    """Resize to fill the target box without squeezing.
+    This prevents the product from looking tiny/compressed on a large canvas.
+    Any overflow is center-cropped, like CSS object-fit: cover.
+    """
+    scale = max(box_w / img.width, box_h / img.height)
+    new_w = max(1, round(img.width * scale))
+    new_h = max(1, round(img.height * scale))
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+    left = max(0, (new_w - box_w) // 2)
+    top = max(0, (new_h - box_h) // 2)
+    return resized.crop((left, top, left + box_w, top + box_h))
+
+
 def paste_center(canvas: Image.Image, img: Image.Image) -> Image.Image:
     x = (canvas.width - img.width) // 2
     y = (canvas.height - img.height) // 2
@@ -356,19 +370,10 @@ def process_image_bytes(
     smart_canvas = should_use_smart_canvas(orig_w, orig_h, resize_mode)
 
     if smart_canvas:
-        # Fit inside the exact box without stretching.
-        # A canvas is needed only because exact dimensions were requested.
-        fitted = resize_fit(img, target_w, target_h)
-        if fill_white or save_fmt == "JPEG":
-            # JPEG has no transparency, so use detected original background unless user chose white.
-            canvas = Image.new("RGB", (target_w, target_h), bg_color)
-        elif image_has_alpha(img) or remove_bg:
-            # Preserve transparency for PNG/WebP when possible.
-            canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
-        else:
-            # Keep original-looking background; do not force white.
-            canvas = Image.new("RGB", (target_w, target_h), bg_color)
-        img = paste_center(canvas, fitted)
+        # Exact size now fills the frame WITHOUT squeezing and WITHOUT adding a big white canvas.
+        # This fixes the issue where tall/wide images looked tiny or compressed.
+        # The image keeps its natural proportions and is center-cropped only if needed.
+        img = resize_cover(img, target_w, target_h)
     else:
         # Width-only and height-only resize naturally. No canvas, no extra background.
         new_w, new_h = get_target_size(orig_w, orig_h, resize_mode, target_w, target_h)
@@ -383,11 +388,11 @@ def process_image_bytes(
     buf = io.BytesIO()
     save_kwargs = {}
     if save_fmt == "JPEG":
-        save_kwargs = {"quality": quality, "optimize": True, "progressive": True, "dpi": (output_dpi, output_dpi)}
+        save_kwargs = {"quality": 100, "subsampling": 0, "optimize": False, "progressive": False, "dpi": (output_dpi, output_dpi)}
     elif save_fmt == "WEBP":
-        save_kwargs = {"quality": quality}
+        save_kwargs = {"quality": 100, "method": 6}
     elif save_fmt == "PNG":
-        save_kwargs = {"dpi": (output_dpi, output_dpi)}
+        save_kwargs = {"dpi": (output_dpi, output_dpi), "compress_level": 0}
 
     img.save(buf, format=save_fmt, **save_kwargs)
     buf.seek(0)
@@ -487,7 +492,7 @@ resize_mode = st.radio(
     "Resize mode",
     ["By Width only", "By Height only", "Exact W x H"],
     horizontal=True,
-    help="Exact W x H fits the image inside the canvas without stretching.",
+    help="Exact W x H fills the frame without squeezing. It may crop edges slightly instead of adding borders.",
 )
 
 col_w, col_h = st.columns(2)
@@ -517,9 +522,11 @@ output_format = None if chosen_format == "Keep original format" else chosen_form
 
 quality = 100
 if output_format == "JPEG":
-    quality = st.slider("JPEG quality", 10, 100, 100, 1)
+    quality = 100
+    st.caption("JPEG is saved at maximum quality with no chroma subsampling.")
 elif output_format == "WEBP":
-    quality = st.slider("WebP quality", 10, 100, 90, 1)
+    quality = 100
+    st.caption("WebP is saved at maximum quality.")
 
 if output_format == "JPEG" and bg_choice == "Remove background - transparent":
     st.warning("JPEG cannot keep transparency. The app will use the detected background color when saving JPEG.")
