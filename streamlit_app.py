@@ -1,5 +1,5 @@
 """
-Creative Editing for Atlas - Streamlit App
+Creative Editing for Atlas - Streamlit App Fixed
 Requirements: streamlit, Pillow, rembg, onnxruntime, pandas, requests, openpyxl
 """
 
@@ -280,20 +280,6 @@ def resize_fit(img: Image.Image, box_w: int, box_h: int) -> Image.Image:
     return fitted
 
 
-def resize_cover(img: Image.Image, box_w: int, box_h: int) -> Image.Image:
-    """Resize to fill the target box without squeezing.
-    This prevents the product from looking tiny/compressed on a large canvas.
-    Any overflow is center-cropped, like CSS object-fit: cover.
-    """
-    scale = max(box_w / img.width, box_h / img.height)
-    new_w = max(1, round(img.width * scale))
-    new_h = max(1, round(img.height * scale))
-    resized = img.resize((new_w, new_h), Image.LANCZOS)
-    left = max(0, (new_w - box_w) // 2)
-    top = max(0, (new_h - box_h) // 2)
-    return resized.crop((left, top, left + box_w, top + box_h))
-
-
 def paste_center(canvas: Image.Image, img: Image.Image) -> Image.Image:
     x = (canvas.width - img.width) // 2
     y = (canvas.height - img.height) // 2
@@ -328,8 +314,9 @@ def process_image_bytes(
     resize_mode: str,
     target_w: int,
     target_h: int,
-    bg_choice: str,
-    crop_white: bool,
+    remove_background: bool,
+    add_white_background: bool,
+    padding_mode: str,
     output_format: Optional[str],
     quality: int,
     output_dpi: int,
@@ -340,26 +327,20 @@ def process_image_bytes(
         orig_pil = opened.copy()
         orig_fmt = opened.format or "PNG"
 
-    remove_bg = bg_choice in ("Remove background - transparent", "Remove background - white")
-    fill_white = bg_choice == "Remove background - white"
-
-    if remove_bg and REMBG_AVAILABLE:
+    if remove_background and REMBG_AVAILABLE:
         raw_bytes = rembg_remove(raw_bytes, session=rembg_session)
         img = Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
-        bbox = img.getbbox()
-        if bbox:
-            img = img.crop(bbox)
+        # Do NOT tight-crop here. Cropping after background removal was causing cut-off images.
     else:
         img = orig_pil.copy()
 
-    if crop_white and not remove_bg:
+    if padding_mode == "Remove padding":
+        # Only removes existing white/near-white border. It does not crop product edges.
         img = crop_white_border(img)
 
-    bg_color = (255, 255, 255) if fill_white else average_corner_color(orig_pil)
+    bg_color = (255, 255, 255) if add_white_background else average_corner_color(orig_pil)
 
-    # Only add/flatten to white when the user explicitly selected white background.
-    # Otherwise keep the image background/transparency as much as the output format allows.
-    if fill_white:
+    if add_white_background:
         img = flatten_to_background(img, (255, 255, 255))
 
     orig_w, orig_h = img.size
@@ -367,15 +348,16 @@ def process_image_bytes(
     if save_fmt not in ("PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF"):
         save_fmt = "PNG"
 
-    smart_canvas = should_use_smart_canvas(orig_w, orig_h, resize_mode)
-
-    if smart_canvas:
-        # Exact size now fills the frame WITHOUT squeezing and WITHOUT adding a big white canvas.
-        # This fixes the issue where tall/wide images looked tiny or compressed.
-        # The image keeps its natural proportions and is center-cropped only if needed.
-        img = resize_cover(img, target_w, target_h)
+    if resize_mode == "Exact W x H":
+        # Always fit inside the target canvas. This prevents cropping and stretching.
+        fitted = resize_fit(img, target_w, target_h)
+        if image_has_alpha(fitted) and not add_white_background and save_fmt in ("PNG", "WEBP"):
+            canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+        else:
+            canvas = Image.new("RGB", (target_w, target_h), bg_color)
+        img = paste_center(canvas, fitted)
     else:
-        # Width-only and height-only resize naturally. No canvas, no extra background.
+        # Width-only and height-only resize naturally. No forced canvas.
         new_w, new_h = get_target_size(orig_w, orig_h, resize_mode, target_w, target_h)
         img = img.resize((new_w, new_h), Image.LANCZOS)
 
@@ -460,20 +442,22 @@ if uploaded_images:
 st.divider()
 st.subheader("Background")
 
-bg_choice = st.radio(
-    "Choose background handling",
-    ["Keep original background", "Remove background - transparent", "Remove background - white"],
-    index=0,
-)
+remove_background = st.checkbox("Remove background", value=False)
+add_white_background = st.checkbox("Add white background", value=False)
 
-if bg_choice.startswith("Remove background") and not REMBG_AVAILABLE:
+if remove_background and not REMBG_AVAILABLE:
     st.error("Background removal is not available. Add rembg and onnxruntime to requirements.txt.")
-elif bg_choice.startswith("Remove background"):
+elif remove_background:
     st.caption("Background removal may be slower on the first run.")
 
-crop_white = False
-if bg_choice == "Keep original background":
-    crop_white = st.checkbox("Crop existing white border before resizing", value=False)
+st.subheader("Padding")
+padding_mode = st.radio(
+    "Choose padding handling",
+    ["Keep padding", "Remove padding"],
+    index=0,
+    horizontal=True,
+    help="Keep padding preserves the full image. Remove padding only trims existing white borders; it will not crop the product.",
+)
 
 st.divider()
 st.subheader("Dimensions")
@@ -492,7 +476,7 @@ resize_mode = st.radio(
     "Resize mode",
     ["By Width only", "By Height only", "Exact W x H"],
     horizontal=True,
-    help="Exact W x H fills the frame without squeezing. It may crop edges slightly instead of adding borders.",
+    help="Exact W x H fits the full image inside the selected size without stretching or cropping.",
 )
 
 col_w, col_h = st.columns(2)
@@ -528,7 +512,7 @@ elif output_format == "WEBP":
     quality = 100
     st.caption("WebP is saved at maximum quality.")
 
-if output_format == "JPEG" and bg_choice == "Remove background - transparent":
+if output_format == "JPEG" and remove_background and not add_white_background:
     st.warning("JPEG cannot keep transparency. The app will use the detected background color when saving JPEG.")
 
 st.divider()
@@ -565,7 +549,7 @@ if st.button("Process & Download ZIP", type="primary", use_container_width=True)
     name_counter: Counter = Counter()
 
     rembg_session = None
-    if bg_choice.startswith("Remove background") and REMBG_AVAILABLE:
+    if remove_background and REMBG_AVAILABLE:
         with st.spinner("Loading background removal model..."):
             rembg_session = new_session("u2netp")
 
@@ -598,8 +582,9 @@ if st.button("Process & Download ZIP", type="primary", use_container_width=True)
                     resize_mode=resize_mode,
                     target_w=target_w,
                     target_h=target_h,
-                    bg_choice=bg_choice,
-                    crop_white=crop_white,
+                    remove_background=remove_background,
+                    add_white_background=add_white_background,
+                    padding_mode=padding_mode,
                     output_format=output_format,
                     quality=quality,
                     output_dpi=output_dpi,
