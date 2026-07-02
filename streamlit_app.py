@@ -75,7 +75,7 @@ st.markdown(
 )
 
 st.title("Creative Editing for Atlas")
-st.caption("Resize images cleanly • Keep original look • Optional background tools • Excel links • ZIP download")
+st.caption("Resize images as-is • No crop • No stretch • Optional background tools • Excel links • ZIP download")
 
 # Recommended marketplace dimensions from the uploaded PXM Marketplace Image Naming Convention file.
 # Format: dropdown label -> (recommended_width, recommended_height, minimum, maximum, aspect_ratio)
@@ -210,18 +210,41 @@ def corner_background_color(img: Image.Image) -> Tuple[int, int, int]:
     return tuple(sum(c[i] for c in colors) // 4 for i in range(3))
 
 
-def remove_padding(img: Image.Image, tolerance: int = 12) -> Image.Image:
-    """Remove only outer transparent/white padding. Does not crop product content."""
+def remove_padding(img: Image.Image, tolerance: int = 6) -> Image.Image:
+    """Safely remove only obvious outer padding.
+
+    This never resizes, stretches, or intentionally cuts the product. It only trims:
+    - fully transparent empty space, or
+    - almost-white empty border around the image.
+
+    The tolerance is intentionally low so product edges are not removed by mistake.
+    """
     if has_alpha(img):
         rgba = img.convert("RGBA")
         alpha_bbox = rgba.split()[3].getbbox()
         return rgba.crop(alpha_bbox) if alpha_bbox else rgba
 
     rgb = img.convert("RGB")
-    bg_color = corner_background_color(rgb)
-    bg = Image.new("RGB", rgb.size, bg_color)
-    diff = ImageChops.difference(rgb, bg).convert("L")
-    mask = diff.point(lambda p: 255 if p > tolerance else 0)
+    # Only trim if the outer border is clearly white/off-white. This avoids cutting
+    # images that have grey/coloured backgrounds or shadows at the edges.
+    border_pixels = []
+    w, h = rgb.size
+    step_x = max(1, w // 30)
+    step_y = max(1, h // 30)
+    for x in range(0, w, step_x):
+        border_pixels.append(rgb.getpixel((x, 0)))
+        border_pixels.append(rgb.getpixel((x, h - 1)))
+    for y in range(0, h, step_y):
+        border_pixels.append(rgb.getpixel((0, y)))
+        border_pixels.append(rgb.getpixel((w - 1, y)))
+
+    white_like = sum(1 for r, g, b in border_pixels if r >= 245 and g >= 245 and b >= 245)
+    if white_like / max(1, len(border_pixels)) < 0.85:
+        return img
+
+    white_bg = Image.new("RGB", rgb.size, (255, 255, 255))
+    diff = ImageChops.difference(rgb, white_bg).convert("L")
+    mask = diff.point(lambda px: 255 if px > tolerance else 0)
     bbox = mask.getbbox()
     return img.crop(bbox) if bbox else img
 
@@ -245,19 +268,28 @@ def flatten_for_jpeg(img: Image.Image, bg_color: Tuple[int, int, int]) -> Image.
     return img.convert("RGB")
 
 
-def fit_inside_canvas(img: Image.Image, target_w: int, target_h: int, bg_mode: str, original_bg: Tuple[int, int, int]) -> Image.Image:
-    """Fit without stretch or crop. Canvas is only used when exact dimensions are requested."""
+def fit_inside_canvas(img: Image.Image, target_w: int, target_h: int, bg_mode: str, output_format: Optional[str]) -> Image.Image:
+    """Resize the complete image into the requested size without crop or stretch.
+
+    Important behaviour:
+    - The full original image is always visible.
+    - No grey/auto-colour border is added.
+    - If Add white background is selected, the canvas is white.
+    - Otherwise, PNG/WebP can keep transparent canvas; JPEG/BMP/TIFF use white because
+      they cannot reliably store transparency.
+    """
     scale = min(target_w / img.width, target_h / img.height)
     new_w = max(1, round(img.width * scale))
     new_h = max(1, round(img.height * scale))
     resized = img.resize((new_w, new_h), Image.LANCZOS)
 
-    if bg_mode == "Add white background":
-        canvas = Image.new("RGB", (target_w, target_h), (255, 255, 255))
-    elif has_alpha(resized):
+    fmt = output_format
+    transparent_canvas_allowed = fmt in (None, "PNG", "WEBP") and bg_mode != "Add white background"
+
+    if transparent_canvas_allowed:
         canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
     else:
-        canvas = Image.new("RGB", (target_w, target_h), original_bg)
+        canvas = Image.new("RGB", (target_w, target_h), (255, 255, 255))
 
     x = (target_w - new_w) // 2
     y = (target_h - new_h) // 2
@@ -265,7 +297,7 @@ def fit_inside_canvas(img: Image.Image, target_w: int, target_h: int, bg_mode: s
         rgba = resized.convert("RGBA")
         canvas.paste(rgba, (x, y), rgba.split()[3])
     else:
-        canvas.paste(resized.convert(canvas.mode), (x, y))
+        canvas.paste(resized.convert("RGB" if canvas.mode == "RGB" else "RGBA"), (x, y))
     return canvas
 
 
@@ -307,15 +339,14 @@ def process_image(
         new_w = max(1, round(img.width * target_h / img.height))
         img = img.resize((new_w, new_h), Image.LANCZOS)
     else:
-        img = fit_inside_canvas(img, target_w, target_h, bg_mode, original_bg)
+        img = fit_inside_canvas(img, target_w, target_h, bg_mode, output_format)
 
     save_fmt = output_format or original_format
     if save_fmt not in ("PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF"):
         save_fmt = "PNG"
 
     if save_fmt == "JPEG":
-        jpg_bg = (255, 255, 255) if bg_mode == "Add white background" else original_bg
-        img = flatten_for_jpeg(img, jpg_bg)
+        img = flatten_for_jpeg(img, (255, 255, 255))
     elif save_fmt in ("PNG", "WEBP") and img.mode not in ("RGBA", "RGB", "L", "LA"):
         img = img.convert("RGBA" if has_alpha(img) else "RGB")
 
@@ -384,7 +415,7 @@ if bg_mode == "Remove background" and not REMBG_AVAILABLE:
 st.divider()
 st.subheader("Padding")
 padding_mode = st.radio("Padding option", ["Keep padding", "Remove padding"], horizontal=True, index=0)
-st.caption("Keep padding preserves the image exactly. Remove padding trims only outer blank/transparent space.")
+st.caption("Keep padding preserves the image exactly. Remove padding only trims obvious empty white/transparent space.")
 
 st.divider()
 st.subheader("Dimensions")
@@ -397,11 +428,12 @@ if preset in MARKETPLACE_PRESETS and preset != "Custom":
     m2.metric("Minimum", min_dim)
     m3.metric("Maximum", max_dim)
     m4.metric("Ratio", aspect_ratio)
+st.caption("Safe resize is used: the app will not crop, stretch, add shadows, or auto-add grey borders.")
 resize_mode = st.radio(
     "Resize mode",
     ["By Width only", "By Height only", "Exact W x H"],
     horizontal=True,
-    help="By Width/Height keeps the image shape exactly. Exact W x H fits inside the box without stretching or cropping.",
+    help="By Width/Height keeps the image ratio. Exact W x H fits the full image inside the size without cropping or stretching.",
 )
 col_w, col_h = st.columns(2)
 target_w = default_w
