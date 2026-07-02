@@ -77,17 +77,37 @@ st.markdown(
 st.title("Creative Editing for Atlas")
 st.caption("Resize images cleanly • Keep original look • Optional background tools • Excel links • ZIP download")
 
-PRESETS = {
-    "Custom": (800, 800),
-    "Square 1000 x 1000": (1000, 1000),
-    "Square 1500 x 1500": (1500, 1500),
-    "Square 2000 x 2000": (2000, 2000),
-    "Shopify 2048 x 2048": (2048, 2048),
-    "eBay 1600 x 1600": (1600, 1600),
-    "Walmart 2200 x 2200": (2200, 2200),
-    "Target 2400 x 2400": (2400, 2400),
-    "Portrait 2000 x 3000": (2000, 3000),
+# Recommended marketplace dimensions from the uploaded PXM Marketplace Image Naming Convention file.
+# Format: dropdown label -> (recommended_width, recommended_height, minimum, maximum, aspect_ratio)
+MARKETPLACE_PRESETS = {
+    "Custom": (800, 800, "—", "—", "—"),
+    "Allegro PL — 2200 x 2200": (2200, 2200, "500 x 500", "2560 x 2560", "1:1"),
+    "Allegro One PL — 2200 x 2200": (2200, 2200, "1000 x 1000", "2560 x 2560", "1:1"),
+    "Best Buy US — 2000 x 2000": (2000, 2000, "2000 x 2000", "—", "1:1"),
+    "Best Buy CA — 2000 x 2000": (2000, 2000, "2000 x 2000", "—", "1:1"),
+    "Bol NL — 2400 x 2400": (2400, 2400, "500 x 500", "6000 x 6000", "1:1"),
+    "Bol BE — 2400 x 2400": (2400, 2400, "500 x 500", "6000 x 6000", "1:1"),
+    "eBay US — 1600 x 1600": (1600, 1600, "500 x 500", "9000 x 9000", "1:1"),
+    "eBay DE — 1600 x 1600": (1600, 1600, "500 x 500", "9000 x 9000", "1:1"),
+    "eBay UK — 1600 x 1600": (1600, 1600, "500 x 500", "9000 x 9000", "1:1"),
+    "Kohl's US — 1000 x 1000": (1000, 1000, "1000 x 1000", "—", "1:1"),
+    "Lowes US — 1000 x 1000": (1000, 1000, "1000 x 1000", "—", "1:1"),
+    "Macy's US — 1000 x 1000": (1000, 1000, "1000 x 1000", "—", "1:1"),
+    "MediaMarkt DE — 1200 x 1200": (1200, 1200, "1000 x 1000", "—", "1:1"),
+    "Mercado Libre US — 1600 x 1600": (1600, 1600, "500 x 500", "2500 x 2500", "1:1"),
+    "Nordstrom US — 2600 x 4000": (2600, 4000, "1300 x 2000", "—", "2:3"),
+    "Octopia FR — 500 x 500": (500, 500, "1000 x 1000", "2500 x 2500", "1:1"),
+    "OTTO DE — 960 x 480": (960, 480, "—", "—", "2:1"),
+    "Target US — 2400 x 2400": (2400, 2400, "1200 x 1200", "5000 x 5000", "1:1"),
+    "Tesco UK — 2400 x 2400": (2400, 2400, "1000 x 1000", "—", "1:1"),
+    "Tik Tok US — 1000 x 1000": (1000, 1000, "600 x 600", "3000 x 3000", "1:1"),
+    "Tik Tok UK — 1000 x 1000": (1000, 1000, "600 x 600", "3000 x 3000", "1:1"),
+    "Walmart US — 2200 x 2200": (2200, 2200, "1500 x 1500", "5000 x 5000", "1:1"),
+    "Walmart CA — 2200 x 2200": (2200, 2200, "1500 x 1500", "5000 x 5000", "1:1"),
+    "Zalando DE — 2000 x 2000": (2000, 2000, "800 x 1200", "5000 x 5000", "2:3"),
 }
+
+PRESETS = {name: (info[0], info[1]) for name, info in MARKETPLACE_PRESETS.items()}
 
 EXT_MAP = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp", "GIF": "gif", "BMP": "bmp", "TIFF": "tif"}
 URL_KEYWORDS = ("image", "img", "link", "url", "photo", "picture", "media", "front", "back", "side", "lifestyle")
@@ -368,8 +388,15 @@ st.caption("Keep padding preserves the image exactly. Remove padding trims only 
 
 st.divider()
 st.subheader("Dimensions")
-preset = st.selectbox("Choose size preset", list(PRESETS.keys()))
+preset = st.selectbox("Choose marketplace recommended size", list(PRESETS.keys()))
 default_w, default_h = PRESETS[preset]
+if preset in MARKETPLACE_PRESETS and preset != "Custom":
+    rec_w, rec_h, min_dim, max_dim, aspect_ratio = MARKETPLACE_PRESETS[preset]
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Recommended", f"{rec_w} x {rec_h}")
+    m2.metric("Minimum", min_dim)
+    m3.metric("Maximum", max_dim)
+    m4.metric("Ratio", aspect_ratio)
 resize_mode = st.radio(
     "Resize mode",
     ["By Width only", "By Height only", "Exact W x H"],
