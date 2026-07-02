@@ -1,6 +1,8 @@
 """
 Creative Editing for Atlas
 
+Keeps the original image look by default.
+No forced white background. No shadow. No cropping unless the user chooses Remove padding.
 
 Requirements:
 streamlit
@@ -73,7 +75,7 @@ st.markdown(
 )
 
 st.title("Creative Editing for Atlas")
-st.caption("Resize images as-is • No crop • No stretch • Optional background tools • Excel links • ZIP download")
+st.caption("Resize images as-is • No crop • No stretch • No borders • Excel links • ZIP download")
 
 # Recommended marketplace dimensions from the uploaded PXM Marketplace Image Naming Convention file.
 # Format: dropdown label -> (recommended_width, recommended_height, minimum, maximum, aspect_ratio)
@@ -266,38 +268,18 @@ def flatten_for_jpeg(img: Image.Image, bg_color: Tuple[int, int, int]) -> Image.
     return img.convert("RGB")
 
 
-def fit_inside_canvas(img: Image.Image, target_w: int, target_h: int, bg_mode: str, output_format: Optional[str]) -> Image.Image:
-    """Resize the complete image into the requested size without crop or stretch.
+def resize_without_canvas(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """Resize the image itself only.
 
-    Important behaviour:
-    - The full original image is always visible.
-    - No grey/auto-colour border is added.
-    - If Add white background is selected, the canvas is white.
-    - Otherwise, PNG/WebP can keep transparent canvas; JPEG/BMP/TIFF use white because
-      they cannot reliably store transparency.
+    This preserves the full original image and aspect ratio.
+    It does NOT create a canvas, so it cannot add grey/white borders.
+    The output may be smaller than the exact target on one side when the
+    original aspect ratio differs from the marketplace size.
     """
     scale = min(target_w / img.width, target_h / img.height)
     new_w = max(1, round(img.width * scale))
     new_h = max(1, round(img.height * scale))
-    resized = img.resize((new_w, new_h), Image.LANCZOS)
-
-    fmt = output_format
-    transparent_canvas_allowed = fmt in (None, "PNG", "WEBP") and bg_mode != "Add white background"
-
-    if transparent_canvas_allowed:
-        canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
-    else:
-        canvas = Image.new("RGB", (target_w, target_h), (255, 255, 255))
-
-    x = (target_w - new_w) // 2
-    y = (target_h - new_h) // 2
-    if has_alpha(resized):
-        rgba = resized.convert("RGBA")
-        canvas.paste(rgba, (x, y), rgba.split()[3])
-    else:
-        canvas.paste(resized.convert("RGB" if canvas.mode == "RGB" else "RGBA"), (x, y))
-    return canvas
-
+    return img.resize((new_w, new_h), Image.LANCZOS)
 
 def process_image(
     raw_bytes: bytes,
@@ -337,7 +319,7 @@ def process_image(
         new_w = max(1, round(img.width * target_h / img.height))
         img = img.resize((new_w, new_h), Image.LANCZOS)
     else:
-        img = fit_inside_canvas(img, target_w, target_h, bg_mode, output_format)
+        img = resize_without_canvas(img, target_w, target_h)
 
     save_fmt = output_format or original_format
     if save_fmt not in ("PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF"):
@@ -426,12 +408,12 @@ if preset in MARKETPLACE_PRESETS and preset != "Custom":
     m2.metric("Minimum", min_dim)
     m3.metric("Maximum", max_dim)
     m4.metric("Ratio", aspect_ratio)
-st.caption("Safe resize is used: the app will not crop, stretch, add shadows, or auto-add grey borders.")
+st.caption("No-border resize is used: the app will resize the image itself only. It will not add grey/white canvas borders, crop, stretch, or add shadows.")
 resize_mode = st.radio(
     "Resize mode",
     ["By Width only", "By Height only", "Exact W x H"],
     horizontal=True,
-    help="By Width/Height keeps the image ratio. Exact W x H fits the full image inside the size without cropping or stretching.",
+    help="All modes keep the original ratio. Exact W x H uses the selected marketplace size as a maximum boundary, but it will not add borders or crop.",
 )
 col_w, col_h = st.columns(2)
 target_w = default_w
