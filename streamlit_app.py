@@ -1,6 +1,17 @@
 """
-Creative Editing for Atlas - Streamlit App Fixed
-Requirements: streamlit, Pillow, rembg, onnxruntime, pandas, requests, openpyxl
+Creative Editing for Atlas
+
+Keeps the original image look by default.
+No forced white background. No shadow. No cropping unless the user chooses Remove padding.
+
+Requirements:
+streamlit
+Pillow
+pandas
+requests
+openpyxl
+rembg
+onnxruntime
 """
 
 import gc
@@ -23,30 +34,18 @@ try:
 except Exception:
     REMBG_AVAILABLE = False
 
-
-# -----------------------------------------------------------------------------
-# Page setup and theme
-# -----------------------------------------------------------------------------
 st.set_page_config(page_title="Creative Editing for Atlas", page_icon="🎨", layout="centered")
 
 NAVY = "#0B2E59"
 LIGHT_NAVY = "#123E73"
 BORDER = "#D9E2EC"
-BG = "#FFFFFF"
 SOFT_BG = "#F5F8FC"
 
 st.markdown(
     f"""
     <style>
-    .stApp {{
-        background: {BG};
-    }}
-    h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {{
-        color: {NAVY};
-    }}
-    div[data-testid="stCaptionContainer"] {{
-        color: {LIGHT_NAVY};
-    }}
+    .stApp {{ background: white; }}
+    h1, h2, h3 {{ color: {NAVY}; }}
     .stButton > button, .stDownloadButton > button {{
         background-color: {NAVY} !important;
         color: white !important;
@@ -69,83 +68,41 @@ st.markdown(
         border-color: {BORDER};
         background: {SOFT_BG};
     }}
-    .small-note {{
-        font-size: 0.86rem;
-        color: #4B5563;
-    }}
+    .small-note {{ font-size: 0.86rem; color: #4B5563; }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 st.title("Creative Editing for Atlas")
-st.caption("Professional Image Editing • Bulk Processing • Smart Resize • Background Removal • Excel Image Links")
+st.caption("Resize images cleanly • Keep original look • Optional background tools • Excel links • ZIP download")
 
-
-# -----------------------------------------------------------------------------
-# Presets - marketplace neutral, no Amazon-related code
-# -----------------------------------------------------------------------------
 PRESETS = {
-    "Custom": (800, 800, None, None, None, None, "-"),
-    "Allegro PL": (2200, 2200, 500, 500, 2560, 2560, "1:1"),
-    "Allegro One PL": (2200, 2200, 1000, 1000, 2560, 2560, "1:1"),
-    "Best Buy US": (2000, 2000, 2000, 2000, None, None, "1:1"),
-    "Best Buy CA": (2000, 2000, 2000, 2000, None, None, "1:1"),
-    "Bol NL": (2400, 2400, 500, 500, 6000, 6000, "1:1"),
-    "Bol BE": (2400, 2400, 500, 500, 6000, 6000, "1:1"),
-    "eBay US": (1600, 1600, 500, 500, 9000, 9000, "1:1"),
-    "eBay DE": (1600, 1600, 500, 500, 9000, 9000, "1:1"),
-    "eBay UK": (1600, 1600, 500, 500, 9000, 9000, "1:1"),
-    "Kohl's US": (1000, 1000, 1000, 1000, None, None, "1:1"),
-    "Lowes US": (1000, 1000, 1000, 1000, None, None, "1:1"),
-    "Macy's US": (1000, 1000, 1000, 1000, None, None, "1:1"),
-    "MediaMarkt DE": (1200, 1200, 1000, 1000, None, None, "1:1"),
-    "Mercado Libre US": (1600, 1600, 500, 500, 2500, 2500, "1:1"),
-    "Nordstrom US": (2600, 4000, 1300, 2000, None, None, "2:3"),
-    "Octopia FR": (1000, 1000, 500, 500, 2500, 2500, "1:1"),
-    "OTTO DE": (960, 480, None, None, None, None, "2:1"),
-    "Target US": (2400, 2400, 1200, 1200, 5000, 5000, "1:1"),
-    "Tesco UK": (2400, 2400, 1000, 1000, None, None, "1:1"),
-    "TikTok US": (1000, 1000, 600, 600, 3000, 3000, "1:1"),
-    "TikTok UK": (1000, 1000, 600, 600, 3000, 3000, "1:1"),
-    "Walmart US": (2200, 2200, 1500, 1500, 5000, 5000, "1:1"),
-    "Walmart CA": (2200, 2200, 1500, 1500, 5000, 5000, "1:1"),
-    "Zalando DE": (2000, 2000, 800, 1200, 5000, 5000, "2:3"),
-    "Shopify": (2048, 2048, 800, 800, 4472, 4472, "1:1"),
+    "Custom": (800, 800),
+    "Square 1000 x 1000": (1000, 1000),
+    "Square 1500 x 1500": (1500, 1500),
+    "Square 2000 x 2000": (2000, 2000),
+    "Shopify 2048 x 2048": (2048, 2048),
+    "eBay 1600 x 1600": (1600, 1600),
+    "Walmart 2200 x 2200": (2200, 2200),
+    "Target 2400 x 2400": (2400, 2400),
+    "Portrait 2000 x 3000": (2000, 3000),
 }
 
 EXT_MAP = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp", "GIF": "gif", "BMP": "bmp", "TIFF": "tif"}
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 URL_KEYWORDS = ("image", "img", "link", "url", "photo", "picture", "media", "front", "back", "side", "lifestyle")
 FILE_KEYWORDS = ("filename", "file name", "file", "sku", "productid", "product id", "item", "item code", "code", "name", "title")
 
 
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
 def clean_text(value) -> str:
     if pd.isna(value):
         return ""
     return str(value).strip()
 
 
-def is_probable_url(value: str) -> bool:
-    if not value:
-        return False
-    value = value.strip()
-    parsed = urlparse(value)
-    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
-
-
-def is_probable_image_url(value: str) -> bool:
-    if not is_probable_url(value):
-        return False
-    parsed = urlparse(value)
-    path = parsed.path.lower()
-    if any(path.endswith(ext) for ext in IMAGE_EXTENSIONS):
-        return True
-    # Many CDN links do not expose extensions, so accept valid URLs too.
-    return True
+def is_url(value: str) -> bool:
+    parsed = urlparse(value.strip()) if value else None
+    return bool(parsed and parsed.scheme in ("http", "https") and parsed.netloc)
 
 
 def safe_filename(name: str, fallback: str = "image") -> str:
@@ -164,9 +121,7 @@ def unique_name(base_name: str, counter: Counter) -> str:
         stem, ext = base_name, ""
     key = base_name.lower()
     counter[key] += 1
-    if counter[key] == 1:
-        return base_name
-    return f"{stem}_{counter[key]}{ext}"
+    return base_name if counter[key] == 1 else f"{stem}_{counter[key]}{ext}"
 
 
 def detect_url_columns(df: pd.DataFrame) -> List[str]:
@@ -174,8 +129,8 @@ def detect_url_columns(df: pd.DataFrame) -> List[str]:
     for col in df.columns:
         col_name = str(col).strip().lower()
         name_hint = any(k in col_name for k in URL_KEYWORDS)
-        sample = df[col].dropna().astype(str).head(25).tolist()
-        url_count = sum(1 for v in sample if is_probable_image_url(v))
+        sample = df[col].dropna().astype(str).head(40).tolist()
+        url_count = sum(1 for v in sample if is_url(v))
         if url_count > 0 and (name_hint or url_count >= max(1, len(sample) // 3)):
             columns.append(col)
     return columns
@@ -195,54 +150,39 @@ def build_excel_sources(df: pd.DataFrame) -> Tuple[List[Dict], List[str], Option
     filename_column = detect_filename_column(df, url_columns)
     sources: List[Dict] = []
     seen_urls = set()
-
     for row_index, row in df.iterrows():
-        base_name = ""
-        if filename_column:
-            base_name = safe_filename(row.get(filename_column), f"row_{row_index + 1}")
-        if not base_name:
-            base_name = f"row_{row_index + 1}"
-
+        base_name = safe_filename(row.get(filename_column), f"row_{row_index + 1}") if filename_column else f"row_{row_index + 1}"
         for col in url_columns:
             url = clean_text(row.get(col))
-            if not is_probable_image_url(url):
-                continue
-            if url in seen_urls:
+            if not is_url(url) or url in seen_urls:
                 continue
             seen_urls.add(url)
             col_part = safe_filename(str(col), "image")
-            sources.append({
-                "type": "url",
-                "url": url,
-                "filename": f"{base_name}_{col_part}.jpg",
-                "row": row_index + 1,
-                "column": str(col),
-            })
-
+            sources.append({"type": "url", "url": url, "filename": f"{base_name}_{col_part}.jpg"})
     return sources, [str(c) for c in url_columns], str(filename_column) if filename_column else None
 
 
-def download_with_retry(session: requests.Session, url: str, timeout: int = 20, retries: int = 3) -> bytes:
-    last_error = None
+def download_with_retry(session: requests.Session, url: str, retries: int = 3, timeout: int = 25) -> bytes:
     headers = {"User-Agent": "Mozilla/5.0 CreativeEditingAtlas/1.0"}
+    last_error = None
     for attempt in range(1, retries + 1):
         try:
-            response = session.get(url, timeout=timeout, headers=headers, stream=True)
+            response = session.get(url, timeout=timeout, headers=headers)
             response.raise_for_status()
-            content_type = response.headers.get("content-type", "").lower()
-            data = response.content
-            if not data:
-                raise ValueError("Empty response")
-            if "text/html" in content_type and len(data) < 200000:
-                raise ValueError("URL returned HTML, not an image")
-            return data
+            if not response.content:
+                raise ValueError("Empty image response")
+            return response.content
         except Exception as exc:
             last_error = exc
             time.sleep(0.35 * attempt)
     raise RuntimeError(str(last_error))
 
 
-def average_corner_color(img: Image.Image) -> Tuple[int, int, int]:
+def has_alpha(img: Image.Image) -> bool:
+    return img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
+
+
+def corner_background_color(img: Image.Image) -> Tuple[int, int, int]:
     rgb = img.convert("RGB")
     w, h = rgb.size
     points = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
@@ -250,183 +190,155 @@ def average_corner_color(img: Image.Image) -> Tuple[int, int, int]:
     return tuple(sum(c[i] for c in colors) // 4 for i in range(3))
 
 
-def crop_white_border(img: Image.Image, tolerance: int = 10) -> Image.Image:
+def remove_padding(img: Image.Image, tolerance: int = 12) -> Image.Image:
+    """Remove only outer transparent/white padding. Does not crop product content."""
+    if has_alpha(img):
+        rgba = img.convert("RGBA")
+        alpha_bbox = rgba.split()[3].getbbox()
+        return rgba.crop(alpha_bbox) if alpha_bbox else rgba
+
     rgb = img.convert("RGB")
-    bg = Image.new("RGB", rgb.size, (255, 255, 255))
+    bg_color = corner_background_color(rgb)
+    bg = Image.new("RGB", rgb.size, bg_color)
     diff = ImageChops.difference(rgb, bg).convert("L")
     mask = diff.point(lambda p: 255 if p > tolerance else 0)
     bbox = mask.getbbox()
     return img.crop(bbox) if bbox else img
 
 
-def image_has_alpha(img: Image.Image) -> bool:
-    return img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
-
-
-def flatten_to_background(img: Image.Image, color: Tuple[int, int, int]) -> Image.Image:
-    if img.mode == "P":
-        img = img.convert("RGBA")
-    if image_has_alpha(img):
+def add_white_background(img: Image.Image) -> Image.Image:
+    """Add white only behind transparent pixels. It does not add borders/shadows."""
+    if has_alpha(img):
         rgba = img.convert("RGBA")
-        bg = Image.new("RGB", rgba.size, color)
+        bg = Image.new("RGB", rgba.size, (255, 255, 255))
         bg.paste(rgba, mask=rgba.split()[3])
         return bg
     return img.convert("RGB")
 
 
-def resize_fit(img: Image.Image, box_w: int, box_h: int) -> Image.Image:
-    fitted = img.copy()
-    fitted.thumbnail((box_w, box_h), Image.LANCZOS)
-    return fitted
-
-
-def paste_center(canvas: Image.Image, img: Image.Image) -> Image.Image:
-    x = (canvas.width - img.width) // 2
-    y = (canvas.height - img.height) // 2
-    if image_has_alpha(img):
+def flatten_for_jpeg(img: Image.Image, bg_color: Tuple[int, int, int]) -> Image.Image:
+    if has_alpha(img):
         rgba = img.convert("RGBA")
+        bg = Image.new("RGB", rgba.size, bg_color)
+        bg.paste(rgba, mask=rgba.split()[3])
+        return bg
+    return img.convert("RGB")
+
+
+def fit_inside_canvas(img: Image.Image, target_w: int, target_h: int, bg_mode: str, original_bg: Tuple[int, int, int]) -> Image.Image:
+    """Fit without stretch or crop. Canvas is only used when exact dimensions are requested."""
+    scale = min(target_w / img.width, target_h / img.height)
+    new_w = max(1, round(img.width * scale))
+    new_h = max(1, round(img.height * scale))
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+
+    if bg_mode == "Add white background":
+        canvas = Image.new("RGB", (target_w, target_h), (255, 255, 255))
+    elif has_alpha(resized):
+        canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+    else:
+        canvas = Image.new("RGB", (target_w, target_h), original_bg)
+
+    x = (target_w - new_w) // 2
+    y = (target_h - new_h) // 2
+    if has_alpha(resized):
+        rgba = resized.convert("RGBA")
         canvas.paste(rgba, (x, y), rgba.split()[3])
     else:
-        canvas.paste(img.convert(canvas.mode), (x, y))
+        canvas.paste(resized.convert(canvas.mode), (x, y))
     return canvas
 
 
-def should_use_smart_canvas(orig_w: int, orig_h: int, resize_mode: str) -> bool:
-    # Only use a canvas when the user explicitly asks for an exact output box.
-    # Width-only and height-only modes must keep natural proportions and must not
-    # add extra background or shrink long/tall images into a square canvas.
-    return resize_mode == "Exact W x H"
-
-
-def get_target_size(orig_w: int, orig_h: int, resize_mode: str, target_w: int, target_h: int) -> Tuple[int, int]:
-    if resize_mode == "By Width only":
-        return target_w, max(1, round(orig_h * target_w / orig_w))
-    if resize_mode == "By Height only":
-        return max(1, round(orig_w * target_h / orig_h)), target_h
-    scale = min(target_w / orig_w, target_h / orig_h)
-    return max(1, round(orig_w * scale)), max(1, round(orig_h * scale))
-
-
-def process_image_bytes(
+def process_image(
     raw_bytes: bytes,
     filename: str,
-    *,
     resize_mode: str,
     target_w: int,
     target_h: int,
-    remove_background: bool,
-    add_white_background: bool,
-    padding_mode: str,
     output_format: Optional[str],
     quality: int,
     output_dpi: int,
-    rembg_session=None,
+    bg_mode: str,
+    padding_mode: str,
 ) -> Tuple[bytes, str, int, int, Optional[Image.Image]]:
     with Image.open(io.BytesIO(raw_bytes)) as opened:
         ImageOps.exif_transpose(opened, in_place=True)
-        orig_pil = opened.copy()
-        orig_fmt = opened.format or "PNG"
-
-    if remove_background and REMBG_AVAILABLE:
-        raw_bytes = rembg_remove(raw_bytes, session=rembg_session)
-        img = Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
-        # Do NOT tight-crop here. Cropping after background removal was causing cut-off images.
-    else:
-        img = orig_pil.copy()
+        original_format = opened.format or "PNG"
+        original_bg = corner_background_color(opened)
+        img = opened.copy()
 
     if padding_mode == "Remove padding":
-        # Only removes existing white/near-white border. It does not crop product edges.
-        img = crop_white_border(img)
+        img = remove_padding(img)
 
-    bg_color = (255, 255, 255) if add_white_background else average_corner_color(orig_pil)
+    if bg_mode == "Remove background":
+        if not REMBG_AVAILABLE:
+            raise RuntimeError("Background removal is selected but rembg/onnxruntime is not installed.")
+        removed = rembg_remove(img.convert("RGBA"), session=new_session("u2netp"))
+        img = removed if isinstance(removed, Image.Image) else Image.open(io.BytesIO(removed)).convert("RGBA")
+    elif bg_mode == "Add white background":
+        img = add_white_background(img)
 
-    if add_white_background:
-        img = flatten_to_background(img, (255, 255, 255))
+    if resize_mode == "By Width only":
+        new_w = target_w
+        new_h = max(1, round(img.height * target_w / img.width))
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+    elif resize_mode == "By Height only":
+        new_h = target_h
+        new_w = max(1, round(img.width * target_h / img.height))
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+    else:
+        img = fit_inside_canvas(img, target_w, target_h, bg_mode, original_bg)
 
-    orig_w, orig_h = img.size
-    save_fmt = output_format or orig_fmt
+    save_fmt = output_format or original_format
     if save_fmt not in ("PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF"):
         save_fmt = "PNG"
 
-    if resize_mode == "Exact W x H":
-        # Always fit inside the target canvas. This prevents cropping and stretching.
-        fitted = resize_fit(img, target_w, target_h)
-        if image_has_alpha(fitted) and not add_white_background and save_fmt in ("PNG", "WEBP"):
-            canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
-        else:
-            canvas = Image.new("RGB", (target_w, target_h), bg_color)
-        img = paste_center(canvas, fitted)
-    else:
-        # Width-only and height-only resize naturally. No forced canvas.
-        new_w, new_h = get_target_size(orig_w, orig_h, resize_mode, target_w, target_h)
-        img = img.resize((new_w, new_h), Image.LANCZOS)
-
     if save_fmt == "JPEG":
-        img = flatten_to_background(img, bg_color)
-    elif save_fmt in ("PNG", "WEBP"):
-        if img.mode not in ("RGBA", "RGB", "L", "LA"):
-            img = img.convert("RGBA" if image_has_alpha(img) else "RGB")
+        jpg_bg = (255, 255, 255) if bg_mode == "Add white background" else original_bg
+        img = flatten_for_jpeg(img, jpg_bg)
+    elif save_fmt in ("PNG", "WEBP") and img.mode not in ("RGBA", "RGB", "L", "LA"):
+        img = img.convert("RGBA" if has_alpha(img) else "RGB")
 
-    buf = io.BytesIO()
+    buffer = io.BytesIO()
     save_kwargs = {}
     if save_fmt == "JPEG":
-        save_kwargs = {"quality": 100, "subsampling": 0, "optimize": False, "progressive": False, "dpi": (output_dpi, output_dpi)}
+        save_kwargs = {"quality": quality, "subsampling": 0, "optimize": True, "progressive": True, "dpi": (output_dpi, output_dpi)}
     elif save_fmt == "WEBP":
-        save_kwargs = {"quality": 100, "method": 6}
+        save_kwargs = {"quality": quality, "method": 6}
     elif save_fmt == "PNG":
-        save_kwargs = {"dpi": (output_dpi, output_dpi), "compress_level": 0}
+        save_kwargs = {"dpi": (output_dpi, output_dpi), "compress_level": 3}
 
-    img.save(buf, format=save_fmt, **save_kwargs)
-    buf.seek(0)
-    output_data = buf.read()
+    img.save(buffer, format=save_fmt, **save_kwargs)
+    buffer.seek(0)
+    output_data = buffer.read()
 
     stem = safe_filename(filename.rsplit(".", 1)[0] if "." in filename else filename, "image")
-    new_ext = EXT_MAP.get(save_fmt, save_fmt.lower())
-    out_name = f"{stem}.{new_ext}"
-
+    extension = EXT_MAP.get(save_fmt, save_fmt.lower())
+    output_name = f"{stem}.{extension}"
     preview_img = img.copy() if img.width * img.height <= 16_000_000 else None
     width, height = img.size
-
     img.close()
-    orig_pil.close()
-    buf.close()
-    return output_data, out_name, width, height, preview_img
+    buffer.close()
+    return output_data, output_name, width, height, preview_img
 
 
-# -----------------------------------------------------------------------------
-# UI
-# -----------------------------------------------------------------------------
 st.divider()
 st.subheader("Upload Images")
-
-uploaded_images = st.file_uploader(
-    "Upload image files",
-    type=["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff"],
-    accept_multiple_files=True,
-)
-
+uploaded_images = st.file_uploader("Upload image files", type=["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff"], accept_multiple_files=True)
 excel_file = st.file_uploader("Or upload an Excel file with image links", type=["xlsx"])
+st.markdown("<div class='small-note'>Excel image columns are detected automatically, including Image1, Image2, Image10, ImageLink, URL, Photo, Front, Back, Side, etc.</div>", unsafe_allow_html=True)
 
-st.markdown(
-    "<div class='small-note'>Excel columns are detected automatically. Columns like Image1, ImageLink1, Image2, Image10, URL, Photo, Front, Back, Side, etc. will be scanned.</div>",
-    unsafe_allow_html=True,
-)
-
-has_input = bool(uploaded_images) or excel_file is not None
-if not has_input:
+if not uploaded_images and excel_file is None:
     st.info("Upload images or an Excel file to start.")
     st.stop()
 
 excel_sources: List[Dict] = []
-detected_url_columns: List[str] = []
-detected_filename_column: Optional[str] = None
-
 if excel_file is not None:
     try:
         df_excel = pd.read_excel(excel_file)
         excel_sources, detected_url_columns, detected_filename_column = build_excel_sources(df_excel)
         if detected_url_columns:
-            st.success(f"Found {len(excel_sources)} image link(s) from {len(detected_url_columns)} column(s).")
+            st.success(f"Found {len(excel_sources)} image link(s) from {len(detected_url_columns)} Excel column(s).")
             with st.expander("Detected Excel columns"):
                 st.write("Image columns:", ", ".join(detected_url_columns))
                 st.write("Filename column:", detected_filename_column or "Auto-generated")
@@ -434,104 +346,68 @@ if excel_file is not None:
             st.warning("No image URL columns were detected in the Excel file.")
     except Exception as exc:
         st.error(f"Could not read Excel file: {exc}")
-        excel_sources = []
 
 if uploaded_images:
     st.success(f"{len(uploaded_images)} uploaded image(s) ready.")
 
 st.divider()
 st.subheader("Background")
-
-remove_background = st.checkbox("Remove background", value=False)
-add_white_background = st.checkbox("Add white background", value=False)
-
-if remove_background and not REMBG_AVAILABLE:
-    st.error("Background removal is not available. Add rembg and onnxruntime to requirements.txt.")
-elif remove_background:
-    st.caption("Background removal may be slower on the first run.")
-
-st.subheader("Padding")
-padding_mode = st.radio(
-    "Choose padding handling",
-    ["Keep padding", "Remove padding"],
-    index=0,
+bg_mode = st.radio(
+    "Choose one",
+    ["Keep original", "Remove background", "Add white background"],
     horizontal=True,
-    help="Keep padding preserves the full image. Remove padding only trims existing white borders; it will not crop the product.",
+    index=0,
 )
+if bg_mode == "Remove background" and not REMBG_AVAILABLE:
+    st.warning("Background removal needs rembg and onnxruntime in requirements.txt.")
+
+st.divider()
+st.subheader("Padding")
+padding_mode = st.radio("Padding option", ["Keep padding", "Remove padding"], horizontal=True, index=0)
+st.caption("Keep padding preserves the image exactly. Remove padding trims only outer blank/transparent space.")
 
 st.divider()
 st.subheader("Dimensions")
-
-marketplace = st.selectbox("Choose preset", list(PRESETS.keys()))
-rec_w, rec_h, min_w, min_h, max_w, max_h, ratio = PRESETS[marketplace]
-
-if marketplace != "Custom":
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Recommended", f"{rec_w} x {rec_h}")
-    c2.metric("Minimum", f"{min_w} x {min_h}" if min_w else "-")
-    c3.metric("Maximum", f"{max_w} x {max_h}" if max_w else "-")
-    c4.metric("Ratio", ratio)
-
+preset = st.selectbox("Choose size preset", list(PRESETS.keys()))
+default_w, default_h = PRESETS[preset]
 resize_mode = st.radio(
     "Resize mode",
     ["By Width only", "By Height only", "Exact W x H"],
     horizontal=True,
-    help="Exact W x H fits the full image inside the selected size without stretching or cropping.",
+    help="By Width/Height keeps the image shape exactly. Exact W x H fits inside the box without stretching or cropping.",
 )
-
 col_w, col_h = st.columns(2)
-target_w = int(rec_w)
-target_h = int(rec_h)
-
+target_w = default_w
+target_h = default_h
 if resize_mode in ("By Width only", "Exact W x H"):
-    target_w = int(col_w.number_input("Width (px)", min_value=1, value=target_w, step=1))
+    target_w = int(col_w.number_input("Width (px)", min_value=1, value=int(default_w), step=1))
 if resize_mode in ("By Height only", "Exact W x H"):
-    target_h = int(col_h.number_input("Height (px)", min_value=1, value=target_h, step=1))
-
-if resize_mode == "By Width only":
-    target_h = int(rec_h)
-elif resize_mode == "By Height only":
-    target_w = int(rec_w)
-
+    target_h = int(col_h.number_input("Height (px)", min_value=1, value=int(default_h), step=1))
 output_dpi = int(st.number_input("DPI", min_value=50, max_value=1200, value=300, step=1))
 
 st.divider()
 st.subheader("Output Format")
-
 format_options = ["Keep original format", "PNG", "JPEG", "WEBP"]
-# Default to keeping the original format to avoid unwanted JPEG compression or forced backgrounds.
-default_format = "Keep original format"
-chosen_format = st.selectbox("Output format", format_options, index=format_options.index(default_format))
+chosen_format = st.selectbox("Output format", format_options, index=0)
 output_format = None if chosen_format == "Keep original format" else chosen_format
-
-quality = 100
+quality = 98
 if output_format == "JPEG":
-    quality = 100
-    st.caption("JPEG is saved at maximum quality with no chroma subsampling.")
+    quality = st.slider("JPEG quality", 80, 100, 98, 1)
 elif output_format == "WEBP":
-    quality = 100
-    st.caption("WebP is saved at maximum quality.")
-
-if output_format == "JPEG" and remove_background and not add_white_background:
-    st.warning("JPEG cannot keep transparency. The app will use the detected background color when saving JPEG.")
+    quality = st.slider("WebP quality", 80, 100, 98, 1)
+else:
+    st.caption("Keeping original format avoids unnecessary conversion or compression.")
 
 st.divider()
 st.subheader("Settings")
-
 preview_enabled = st.checkbox("Preview first 5 processed images", value=True)
 retry_count = 3
 
-# Prepare task counts without loading everything into memory.
 direct_count = len(uploaded_images) if uploaded_images else 0
 url_count = len(excel_sources)
 total_count = direct_count + url_count
-
 st.info(f"Ready to process {total_count} image(s).")
 
-
-# -----------------------------------------------------------------------------
-# Processing
-# -----------------------------------------------------------------------------
 if st.button("Process & Download ZIP", type="primary", use_container_width=True):
     if total_count == 0:
         st.warning("No images found to process.")
@@ -547,12 +423,6 @@ if st.button("Process & Download ZIP", type="primary", use_container_width=True)
     processed_rows = []
     preview_items = []
     name_counter: Counter = Counter()
-
-    rembg_session = None
-    if remove_background and REMBG_AVAILABLE:
-        with st.spinner("Loading background removal model..."):
-            rembg_session = new_session("u2netp")
-
     session = requests.Session()
 
     def iter_sources() -> Iterable[Dict]:
@@ -568,7 +438,7 @@ if st.button("Process & Download ZIP", type="primary", use_container_width=True)
             filename = source.get("filename", f"image_{index}.jpg")
             try:
                 if source["type"] == "upload":
-                    status_box.info(f"Reading uploaded image {index} of {total_count}: {filename}")
+                    status_box.info(f"Reading image {index} of {total_count}: {filename}")
                     source["file"].seek(0)
                     raw_bytes = source["file"].read()
                 else:
@@ -576,21 +446,18 @@ if st.button("Process & Download ZIP", type="primary", use_container_width=True)
                     raw_bytes = download_with_retry(session, source["url"], retries=retry_count)
 
                 status_box.info(f"Processing image {index} of {total_count}: {filename}")
-                output_data, out_name, w, h, preview_img = process_image_bytes(
-                    raw_bytes,
-                    filename,
+                output_data, out_name, w, h, preview_img = process_image(
+                    raw_bytes=raw_bytes,
+                    filename=filename,
                     resize_mode=resize_mode,
                     target_w=target_w,
                     target_h=target_h,
-                    remove_background=remove_background,
-                    add_white_background=add_white_background,
-                    padding_mode=padding_mode,
                     output_format=output_format,
                     quality=quality,
                     output_dpi=output_dpi,
-                    rembg_session=rembg_session,
+                    bg_mode=bg_mode,
+                    padding_mode=padding_mode,
                 )
-
                 out_name = unique_name(out_name, name_counter)
                 zf.writestr(out_name, output_data)
                 processed_rows.append({"File": out_name, "Width": w, "Height": h, "Status": "Success"})
@@ -604,7 +471,6 @@ if st.button("Process & Download ZIP", type="primary", use_container_width=True)
                 errors.append({"File": filename, "Error": str(exc)})
 
             progress.progress(index / total_count, text=f"Processed {index} of {total_count}")
-
             raw_bytes = None
             if index % 25 == 0:
                 gc.collect()
@@ -620,7 +486,6 @@ if st.button("Process & Download ZIP", type="primary", use_container_width=True)
 
     success_count = len(processed_rows)
     fail_count = len(errors)
-
     st.success(f"Done. {success_count} image(s) processed, {fail_count} failed.")
 
     c1, c2, c3 = st.columns(3)
@@ -643,11 +508,11 @@ if st.button("Process & Download ZIP", type="primary", use_container_width=True)
     st.download_button(
         label=f"Download ZIP ({success_count} images)",
         data=zip_buffer,
-        file_name="creative_editing_atlas.zip",
+        file_name="creative_editing_for_atlas.zip",
         mime="application/zip",
         use_container_width=True,
         type="primary",
     )
 
 st.divider()
-st.caption("Images are processed only in your session. Creative Editing for Atlas.")
+st.caption("Default behavior keeps the original image look. No shadow is added. Cropping happens only if Remove padding is selected.")
