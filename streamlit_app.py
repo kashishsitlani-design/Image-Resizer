@@ -1,8 +1,6 @@
 """
 Creative Editing for Atlas
 
-Keeps the original image look by default.
-No forced white background. No shadow. No cropping unless the user chooses Remove padding.
 
 Requirements:
 streamlit
