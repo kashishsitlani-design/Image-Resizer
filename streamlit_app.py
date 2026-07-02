@@ -75,7 +75,7 @@ st.markdown(
 )
 
 st.title("Creative Editing for Atlas")
-st.caption("Resize images as-is • No crop • No stretch • No borders • Excel links • ZIP download")
+st.caption("Resize images safely • Exact marketplace sizes • No stretch • Excel links • ZIP download")
 
 # Recommended marketplace dimensions from the uploaded PXM Marketplace Image Naming Convention file.
 # Format: dropdown label -> (recommended_width, recommended_height, minimum, maximum, aspect_ratio)
@@ -268,18 +268,58 @@ def flatten_for_jpeg(img: Image.Image, bg_color: Tuple[int, int, int]) -> Image.
     return img.convert("RGB")
 
 
-def resize_without_canvas(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
-    """Resize the image itself only.
+def resize_image_only(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """Resize the image itself only, preserving full image and aspect ratio.
 
-    This preserves the full original image and aspect ratio.
-    It does NOT create a canvas, so it cannot add grey/white borders.
-    The output may be smaller than the exact target on one side when the
-    original aspect ratio differs from the marketplace size.
+    This will NOT guarantee exact marketplace dimensions when the source ratio
+    is different, because exact dimensions require either padding, crop, or stretch.
     """
     scale = min(target_w / img.width, target_h / img.height)
     new_w = max(1, round(img.width * scale))
     new_h = max(1, round(img.height * scale))
     return img.resize((new_w, new_h), Image.LANCZOS)
+
+
+def resize_exact_canvas(img: Image.Image, target_w: int, target_h: int, canvas_mode: str) -> Image.Image:
+    """Return exactly target_w x target_h without cropping or stretching.
+
+    The full image remains visible. Any extra space is padding.
+    White is used by default so there is no grey background.
+    Transparent padding is available only for PNG/WebP outputs.
+    """
+    scale = min(target_w / img.width, target_h / img.height)
+    new_w = max(1, round(img.width * scale))
+    new_h = max(1, round(img.height * scale))
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+    ox = (target_w - new_w) // 2
+    oy = (target_h - new_h) // 2
+
+    if canvas_mode == "Transparent padding":
+        canvas = Image.new("RGBA", (target_w, target_h), (255, 255, 255, 0))
+        if resized.mode == "RGBA":
+            canvas.paste(resized, (ox, oy), resized.split()[3])
+        else:
+            canvas.paste(resized.convert("RGBA"), (ox, oy))
+        return canvas
+
+    # Default: white canvas. This guarantees exact dimensions and avoids grey.
+    canvas = Image.new("RGB", (target_w, target_h), (255, 255, 255))
+    if resized.mode == "RGBA":
+        canvas.paste(resized, (ox, oy), resized.split()[3])
+    else:
+        canvas.paste(resized.convert("RGB"), (ox, oy))
+    return canvas
+
+
+def resize_exact_crop(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """Return exactly target_w x target_h by filling frame and cropping overflow."""
+    scale = max(target_w / img.width, target_h / img.height)
+    new_w = max(1, round(img.width * scale))
+    new_h = max(1, round(img.height * scale))
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+    left = max(0, (new_w - target_w) // 2)
+    top = max(0, (new_h - target_h) // 2)
+    return resized.crop((left, top, left + target_w, top + target_h))
 
 def process_image(
     raw_bytes: bytes,
@@ -292,6 +332,8 @@ def process_image(
     output_dpi: int,
     bg_mode: str,
     padding_mode: str,
+    exact_behavior: str,
+    canvas_mode: str,
 ) -> Tuple[bytes, str, int, int, Optional[Image.Image]]:
     with Image.open(io.BytesIO(raw_bytes)) as opened:
         ImageOps.exif_transpose(opened, in_place=True)
@@ -319,7 +361,12 @@ def process_image(
         new_w = max(1, round(img.width * target_h / img.height))
         img = img.resize((new_w, new_h), Image.LANCZOS)
     else:
-        img = resize_without_canvas(img, target_w, target_h)
+        if exact_behavior == "Exact size - full image with padding":
+            img = resize_exact_canvas(img, target_w, target_h, canvas_mode)
+        elif exact_behavior == "Exact size - fill frame / crop edges":
+            img = resize_exact_crop(img, target_w, target_h)
+        else:
+            img = resize_image_only(img, target_w, target_h)
 
     save_fmt = output_format or original_format
     if save_fmt not in ("PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF"):
@@ -408,13 +455,34 @@ if preset in MARKETPLACE_PRESETS and preset != "Custom":
     m2.metric("Minimum", min_dim)
     m3.metric("Maximum", max_dim)
     m4.metric("Ratio", aspect_ratio)
-st.caption("No-border resize is used: the app will resize the image itself only. It will not add grey/white canvas borders, crop, stretch, or add shadows.")
+st.caption("To get the exact selected marketplace dimensions, the app must use padding or crop. Stretching is never used.")
 resize_mode = st.radio(
     "Resize mode",
     ["By Width only", "By Height only", "Exact W x H"],
     horizontal=True,
-    help="All modes keep the original ratio. Exact W x H uses the selected marketplace size as a maximum boundary, but it will not add borders or crop.",
+    help="By Width/Height keeps the full image ratio. Exact W x H can guarantee the selected dimensions.",
 )
+exact_behavior = "Resize image only - dimensions may differ"
+canvas_mode = "White padding"
+if resize_mode == "Exact W x H":
+    exact_behavior = st.radio(
+        "Exact size behaviour",
+        [
+            "Exact size - full image with padding",
+            "Exact size - fill frame / crop edges",
+            "Resize image only - dimensions may differ",
+        ],
+        index=0,
+        help="For exact dimensions without stretching, choose padding or crop. Padding keeps the full image visible. Crop fills the frame but may cut edges.",
+    )
+    if exact_behavior == "Exact size - full image with padding":
+        canvas_mode = st.radio(
+            "Padding background",
+            ["White padding", "Transparent padding"],
+            horizontal=True,
+            index=0,
+            help="White padding gives exact dimensions for JPG/PNG/WebP. Transparent padding works best with PNG/WebP.",
+        )
 col_w, col_h = st.columns(2)
 target_w = default_w
 target_h = default_h
@@ -436,6 +504,8 @@ elif output_format == "WEBP":
     quality = st.slider("WebP quality", 80, 100, 98, 1)
 else:
     st.caption("Keeping original format avoids unnecessary conversion or compression.")
+if resize_mode == "Exact W x H" and exact_behavior == "Exact size - full image with padding" and canvas_mode == "Transparent padding" and output_format == "JPEG":
+    st.warning("JPEG cannot keep transparent padding. Choose PNG/WebP or use White padding.")
 
 st.divider()
 st.subheader("Settings")
@@ -496,6 +566,8 @@ if st.button("Process & Download ZIP", type="primary", use_container_width=True)
                     output_dpi=output_dpi,
                     bg_mode=bg_mode,
                     padding_mode=padding_mode,
+                    exact_behavior=exact_behavior,
+                    canvas_mode=canvas_mode,
                 )
                 out_name = unique_name(out_name, name_counter)
                 zf.writestr(out_name, output_data)
