@@ -90,9 +90,17 @@ PXM_MARKETPLACE_CODES = {
 }
 STACK_TEMPLATE_HEADERS = ["Import Type", "Product", "Image Stack Group", "Filename", "Image Stack Order"]
 
+
+def get_marketplace_preset_dims(label: str) -> Optional[Tuple[int, int]]:
+    """Reuse the same recommended W/H already defined in PRESETS above, matched by marketplace label."""
+    for key, (w, h) in PRESETS.items():
+        if key.startswith(f"{label} \u2014"):
+            return w, h
+    return None
+
 workflow = st.radio(
     "What do you want to do?",
-    ["Resize / edit images", "Download, rename for PXM & build Image Stack template"],
+    ["Resize / edit images", "Renaming and IS creation"],
     horizontal=True,
 )
 
@@ -710,7 +718,29 @@ else:
     st.caption("PNG / WebP / GIF / BMP / TIFF will be re-encoded as JPG (transparency flattened onto white).")
 
     st.divider()
-    st.subheader("4. Image Stack Import Template")
+    st.subheader("4. Resize to marketplace size (optional)")
+    resize_for_marketplace = st.checkbox("Also resize images to the marketplace's size", value=False)
+    resize_behavior, resize_target_w, resize_target_h = None, None, None
+    if resize_for_marketplace:
+        preset_dims = get_marketplace_preset_dims(marketplace_label) if marketplace_label != "Custom" else None
+        default_w, default_h = preset_dims or (2000, 2000)
+        if preset_dims:
+            st.caption(f"Recommended size for {marketplace_label}: {default_w} x {default_h}")
+        else:
+            st.caption("No recommended size on file for this marketplace - enter the size you need.")
+        rc1, rc2 = st.columns(2)
+        resize_target_w = int(rc1.number_input("Width (px)", min_value=1, value=int(default_w), step=1, key="pxm_resize_w"))
+        resize_target_h = int(rc2.number_input("Height (px)", min_value=1, value=int(default_h), step=1, key="pxm_resize_h"))
+        resize_behavior = st.radio(
+            "How should it reach that size?",
+            ["Fit inside (no padding, dimensions may differ slightly)",
+             "Exact size - white padding",
+             "Exact size - crop to fill"],
+            index=1,
+        )
+
+    st.divider()
+    st.subheader("5. Image Stack Import Template")
     import_type = st.selectbox("Import Type", ["Create/Edit", "Edit", "Remove Image", "Delete"], index=0)
     stack_template_file = st.file_uploader(
         "Optional: upload your blank Image Stack Import Template so the output matches its exact headers",
@@ -749,22 +779,40 @@ else:
         stack_rows, errors = [], []
         session = requests.Session()
 
+        def _apply_marketplace_resize(img: Image.Image) -> Image.Image:
+            if resize_behavior.startswith("Fit inside"):
+                return resize_fit(img, resize_target_w, resize_target_h)
+            if resize_behavior.startswith("Exact size - white"):
+                return resize_exact_canvas(img, resize_target_w, resize_target_h, "White padding")
+            return resize_exact_crop(img, resize_target_w, resize_target_h)
+
         def _download_one(job):
             master_id, mpn, url, seq = job
             name_prefix = "_".join(p for p in (mpn, master_id) if p)
             ext_guess = url.rsplit(".", 1)[-1].lower() if "." in url.rsplit("/", 1)[-1] else "jpg"
             ext_guess = ext_guess if ext_guess in ("jpg", "jpeg", "png", "webp", "gif", "bmp", "tif", "tiff") else "jpg"
+            needs_reencode = force_jpg or resize_for_marketplace
             out_ext = "jpg" if force_jpg else ext_guess
             filename = f"{name_prefix}_{combined_code}_ISP_{seq:02d}.{out_ext}"
             try:
                 raw = download_with_retry(session, url, retries=3)
-                if force_jpg:
+                if needs_reencode:
                     with Image.open(io.BytesIO(raw)) as im:
                         ImageOps.exif_transpose(im, in_place=True)
-                        im = flatten_to_background(im, (255, 255, 255))
-                        buf = io.BytesIO()
-                        im.save(buf, format="JPEG", quality=95, optimize=True)
-                        raw = buf.getvalue()
+                        original_format = im.format or "JPEG"
+                        img = im.copy()
+                    if resize_for_marketplace:
+                        img = _apply_marketplace_resize(img)
+                    save_fmt = "JPEG" if force_jpg else (original_format if original_format in
+                               ("PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF") else "JPEG")
+                    if save_fmt == "JPEG":
+                        img = flatten_to_background(img, (255, 255, 255))
+                    buf = io.BytesIO()
+                    save_kwargs = {"quality": 95, "optimize": True} if save_fmt in ("JPEG", "WEBP") else {}
+                    img.save(buf, format=save_fmt, **save_kwargs)
+                    raw = buf.getvalue()
+                    out_ext = EXT_MAP.get(save_fmt, save_fmt.lower())
+                    filename = f"{name_prefix}_{combined_code}_ISP_{seq:02d}.{out_ext}"
                 return {"ok": True, "master_id": master_id, "filename": filename, "seq": seq, "data": raw}
             except Exception as exc:
                 return {"ok": False, "master_id": master_id, "filename": filename, "seq": seq, "error": str(exc)}
