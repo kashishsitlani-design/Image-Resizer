@@ -625,32 +625,52 @@ if workflow == "Resize / edit images":
         status_box.empty()
 
         success_count, fail_count = len(processed_rows), len(errors)
-        st.success(f"Done. {success_count} image(s) processed, {fail_count} failed.")
+        preview_payload = []
+        for out_name, preview_img in preview_items:
+            pbuf = io.BytesIO()
+            preview_img.save(pbuf, format="PNG")
+            preview_payload.append((out_name, pbuf.getvalue()))
+            preview_img.close()
+
+        st.session_state["resize_result"] = {
+            "zip_bytes": zip_buffer.getvalue(),
+            "success_count": success_count,
+            "fail_count": fail_count,
+            "elapsed": elapsed,
+            "errors": errors,
+            "preview": preview_payload if preview_enabled else [],
+        }
+
+    resize_result = st.session_state.get("resize_result")
+    if resize_result:
+        st.success(f"Done. {resize_result['success_count']} image(s) processed, {resize_result['fail_count']} failed.")
         c1, c2, c3 = st.columns(3)
-        c1.metric("Successful", success_count)
-        c2.metric("Failed", fail_count)
-        c3.metric("Time", f"{elapsed:.1f}s")
+        c1.metric("Successful", resize_result["success_count"])
+        c2.metric("Failed", resize_result["fail_count"])
+        c3.metric("Time", f"{resize_result['elapsed']:.1f}s")
 
-        if preview_enabled and preview_items:
-            with preview_box:
-                st.markdown("Preview")
-                for out_name, preview_img in preview_items:
-                    st.image(preview_img, caption=out_name, use_container_width=True)
-                    preview_img.close()
+        if resize_result["preview"]:
+            st.markdown("Preview")
+            for out_name, png_bytes in resize_result["preview"]:
+                st.image(png_bytes, caption=out_name, use_container_width=True)
 
-        if errors:
+        if resize_result["errors"]:
             with st.expander("View errors"):
-                st.dataframe(pd.DataFrame(errors), use_container_width=True)
+                st.dataframe(pd.DataFrame(resize_result["errors"]), use_container_width=True)
                 st.caption("The ZIP includes error_report.csv.")
 
         st.download_button(
-            label=f"Download ZIP ({success_count} images)",
-            data=zip_buffer,
+            label=f"Download ZIP ({resize_result['success_count']} images)",
+            data=resize_result["zip_bytes"],
             file_name="creative_editing_for_atlas.zip",
             mime="application/zip",
             use_container_width=True,
             type="primary",
+            key="resize_download_zip",
         )
+        if st.button("Clear results", use_container_width=True, key="resize_clear"):
+            del st.session_state["resize_result"]
+            st.rerun()
 
     st.divider()
     st.caption("Default behavior keeps the original image look. No shadow is added. Cropping happens only if Remove padding is selected. Output filenames match the name you gave each image.")
@@ -877,28 +897,43 @@ else:
         template_buffer.seek(0)
 
         success_count, fail_count = len(stack_rows), len(errors)
-        st.success(f"Done. {success_count} image(s) downloaded and renamed, {fail_count} failed.")
-        c1, c2 = st.columns(2)
-        c1.metric("Successful", success_count)
-        c2.metric("Failed", fail_count)
+        st.session_state["pxm_result"] = {
+            "zip_bytes": zip_buffer.getvalue(),
+            "template_bytes": template_buffer.getvalue(),
+            "errors": errors,
+            "success_count": success_count,
+            "fail_count": fail_count,
+        }
 
-        if errors:
+    pxm_result = st.session_state.get("pxm_result")
+    if pxm_result:
+        st.success(f"Done. {pxm_result['success_count']} image(s) downloaded and renamed, {pxm_result['fail_count']} failed.")
+        c1, c2 = st.columns(2)
+        c1.metric("Successful", pxm_result["success_count"])
+        c2.metric("Failed", pxm_result["fail_count"])
+
+        if pxm_result["errors"]:
             with st.expander("View errors"):
-                st.dataframe(pd.DataFrame(errors), use_container_width=True)
+                st.dataframe(pd.DataFrame(pxm_result["errors"]), use_container_width=True)
 
         dl1, dl2 = st.columns(2)
         with dl1:
             st.download_button(
-                "Download renamed images (ZIP)", data=zip_buffer,
+                "Download renamed images (ZIP)", data=pxm_result["zip_bytes"],
                 file_name="pxm_renamed_images.zip", mime="application/zip", use_container_width=True,
+                key="pxm_download_zip",
             )
         with dl2:
             st.download_button(
-                "Download Image Stack Template (.xlsx)", data=template_buffer,
+                "Download Image Stack Template (.xlsx)", data=pxm_result["template_bytes"],
                 file_name="image_stack_import_template.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
+                key="pxm_download_template",
             )
+        if st.button("Clear results", use_container_width=True):
+            del st.session_state["pxm_result"]
+            st.rerun()
 
     st.divider()
     st.caption(
